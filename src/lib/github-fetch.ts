@@ -23,6 +23,26 @@ export class GitHubApiError extends Error {
   }
 }
 
+/** Thrown when the GitHub API responds with 401 (revoked / expired token). */
+export class GitHubAuthError extends Error {
+  constructor() {
+    super("GitHub token revoked or expired");
+    this.name = "GitHubAuthError";
+  }
+}
+
+/**
+ * Returns a standardized 401 JSON response for clients whose GitHub token
+ * has been revoked.  Routes should return this response so that client-side
+ * error handling can trigger a re-authentication flow.
+ */
+export function githubAuthErrorResponse(): Response {
+  return Response.json(
+    { error: "GitHub access token revoked. Please sign in again." },
+    { status: 401 }
+  );
+}
+
 /**
  * Fetch a GitHub API endpoint with standard headers.
  * Throws GitHubRateLimitError on 403/429, GitHubApiError on other non-ok responses.

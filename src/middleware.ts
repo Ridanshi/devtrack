@@ -1,6 +1,7 @@
 import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
 import { createMemoryFixedWindowRateLimiter, getClientIp } from "@/lib/rate-limit";
+import { checkCsrfOrigin, isCsrfExemptPath, isMutationMethod } from "@/lib/csrf";
 
 export const runtime = "nodejs";
 
@@ -163,6 +164,22 @@ async function checkRateLimit(identifier: string, limit: number) {
 
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
+  const method = req.method;
+
+  // ─── CSRF protection for mutation API requests ───────────────────────────
+  // Validated before the session token lookup for efficiency.  Routes that
+  // authenticate via HMAC signatures, CRON_SECRET, or API-key bearer tokens
+  // are on the exempt list and pass through unchanged.
+  if (
+    pathname.startsWith("/api/") &&
+    isMutationMethod(method) &&
+    !isCsrfExemptPath(pathname)
+  ) {
+    const csrfError = checkCsrfOrigin(req);
+    if (csrfError) {
+      return NextResponse.json({ error: csrfError }, { status: 403 });
+    }
+  }
 
   // PLAYWRIGHT_SERVER_MODE is not forwarded into the webServer env by
   // playwright.config.mjs, so isPlaywrightServer is always false at runtime.
@@ -197,6 +214,16 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    return NextResponse.next();
+  }
+
+  // ─── Rate limiting applies to /api/metrics/* and /api/contact only ───────
+  // All other routes (webhooks, cron, local-coding sync, etc.) pass through
+  // without browser-session rate limiting — they have their own auth.
+  const isRateLimitedPath =
+    pathname.startsWith("/api/metrics/") || pathname === "/api/contact";
+
+  if (!isRateLimitedPath) {
     return NextResponse.next();
   }
 
@@ -255,7 +282,8 @@ export const config = {
     "/dashboard/:path*",
     "/settings",
     "/settings/:path*",
-    "/api/metrics/:path*",
-    "/api/contact",
+    // All API routes: CSRF protection applies to mutations; rate limiting
+    // is scoped to /api/metrics/* and /api/contact within the handler.
+    "/api/:path*",
   ],
 };
