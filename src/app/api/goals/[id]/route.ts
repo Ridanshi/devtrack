@@ -81,15 +81,18 @@ export async function PATCH(
     updates.recurrence = recurrence;
   }
 
-  if (current !== undefined) {
-    if (typeof current !== "number" || current < 0) {
-      return Response.json(
-        { error: "Invalid current value" },
-        { status: 400 }
-      );
-    }
-    updates.current = current;
+  // current is required and must be a non-negative integer.
+  if (
+    typeof current !== "number" ||
+    !Number.isInteger(current) ||
+    current < 0
+  ) {
+    return Response.json(
+      { error: "current must be a non-negative integer" },
+      { status: 400 }
+    );
   }
+  updates.current = current;
 
   const { data: existingGoal } = await supabaseAdmin
     .from("goals")
@@ -100,10 +103,6 @@ export async function PATCH(
 
   if (!existingGoal) {
     return Response.json({ error: "Goal not found" }, { status: 404 });
-  }
-
-  if (Object.keys(updates).length === 0) {
-    return Response.json({ goal: existingGoal });
   }
 
   // Block manual progress edits for activity-derived goal types.

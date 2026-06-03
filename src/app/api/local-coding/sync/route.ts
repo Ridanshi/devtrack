@@ -24,13 +24,11 @@ function hashApiKey(key: string): string {
 
 async function authenticateApiKey(apiKey: string): Promise<string | null> {
   const keyHash = hashApiKey(apiKey);
-  const keyHashFilter = `api_key_hash.eq.${keyHash},api_key.eq.${keyHash}`;
-
-
+  // Authenticate only against the canonical hash column.
   const { data: keyRecord } = await supabaseAdmin
     .from("local_coding_api_keys")
     .select("user_id")
-    .or(keyHashFilter)
+    .eq("api_key_hash", keyHash)
     .single();
 
   if (!keyRecord) {
@@ -40,7 +38,7 @@ async function authenticateApiKey(apiKey: string): Promise<string | null> {
   await supabaseAdmin
     .from("local_coding_api_keys")
     .update({ last_used_at: new Date().toISOString() })
-    .or(keyHashFilter);
+    .eq("api_key_hash", keyHash);
 
   return keyRecord.user_id;
 }

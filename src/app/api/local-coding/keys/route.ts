@@ -66,12 +66,13 @@ export async function POST(req: NextRequest) {
 
   const apiKey = randomBytes(24).toString("base64url");
   const apiKeyHash = hashApiKey(apiKey);
+  const apiKeyPrefix = apiKey.slice(0, 8);
 
   const { data: keyRecord, error } = await supabaseAdmin
     .from("local_coding_api_keys")
     .insert({
       user_id: user.id,
-      api_key: apiKeyHash,
+      api_key: apiKeyPrefix,
       api_key_hash: apiKeyHash,
       name,
     })
