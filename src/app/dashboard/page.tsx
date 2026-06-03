@@ -29,6 +29,7 @@ import { redirect } from "next/navigation";
 import DashboardSSEProvider from "@/components/DashboardSSEProvider";
 import DailyNoteWidget from "@/components/DailyNoteWidget";
 import WidgetErrorBoundary from "@/components/WidgetErrorBoundary";
+import GitHubAchievementProgress from "@/components/GitHubAchievementProgress";
 
 const SkeletonCard = () => (
   <div
@@ -303,6 +304,9 @@ export default async function DashboardPage() {
               </LazyWidget>
               <LazyWidget fallback={<SkeletonCard />}>
                 <LanguageBreakdown />
+              </LazyWidget>
+              <LazyWidget fallback={<SkeletonCard />}>
+                <GitHubAchievementProgress />
               </LazyWidget>
               <LazyWidget fallback={<SkeletonCard />}>
                 <FriendComparison />
