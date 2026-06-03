@@ -1,6 +1,12 @@
 import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
 import { createMemoryFixedWindowRateLimiter, getClientIp } from "@/lib/rate-limit";
+import {
+  checkAuthRateLimit,
+  isAuthSensitivePath,
+  AUTH_LIMIT,
+} from "@/lib/auth-rate-limit";
+import { checkCsrfOrigin, isCsrfExemptPath, isMutationMethod } from "@/lib/csrf";
 
 export const runtime = "nodejs";
 
@@ -163,6 +169,22 @@ async function checkRateLimit(identifier: string, limit: number) {
 
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
+  const method = req.method;
+
+  // ─── CSRF protection for mutation API requests ───────────────────────────
+  // Validated before the session token lookup for efficiency.  Routes that
+  // authenticate via HMAC signatures, CRON_SECRET, or API-key bearer tokens
+  // are on the exempt list and pass through unchanged.
+  if (
+    pathname.startsWith("/api/") &&
+    isMutationMethod(method) &&
+    !isCsrfExemptPath(pathname)
+  ) {
+    const csrfError = checkCsrfOrigin(req);
+    if (csrfError) {
+      return NextResponse.json({ error: csrfError }, { status: 403 });
+    }
+  }
 
   // PLAYWRIGHT_SERVER_MODE is not forwarded into the webServer env by
   // playwright.config.mjs, so isPlaywrightServer is always false at runtime.
@@ -197,6 +219,47 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    return NextResponse.next();
+  }
+
+  // ─── Authentication rate limiting ───────────────────────────────────────
+  // Apply a strict per-IP limit to OAuth initiation and callback endpoints.
+  // These paths can be flooded to exhaust GitHub's token exchange quota or
+  // to probe for valid OAuth codes.  The general metrics limiter uses a 60-s
+  // window suited for dashboard traffic; auth endpoints need a tighter
+  // 15-minute window with a much lower ceiling.
+  //
+  // /api/auth/session and /api/auth/csrf are deliberately excluded: they are
+  // called on every page render and are not authentication attack surfaces.
+  if (isAuthSensitivePath(pathname)) {
+    const ip = getIp(req);
+    // In development the limit is relaxed so test suites and local sign-in
+    // flows are not blocked by the strict production threshold.
+    const authLimit = isDev ? 1000 : AUTH_LIMIT;
+    const authResult = checkAuthRateLimit(ip, authLimit);
+
+    if (!authResult.allowed) {
+      console.warn("auth_rate_limit_hit", { ip, path: pathname });
+      const headers = buildHeaders({ ...authResult, limit: authLimit });
+      return NextResponse.json(
+        { error: "Too many authentication attempts. Please try again later." },
+        { status: 429, headers }
+      );
+    }
+
+    // Auth paths pass through after the rate-limit check; they do not run
+    // the session-based metrics limiter below.
+    return NextResponse.next();
+  }
+
+  // ─── Rate limiting applies to /api/metrics/* and /api/contact only ───────
+  // All other API routes (including non-metric API routes) pass through.
+  // Bearer-token clients have their own authentication; they bypass this
+  // browser-session rate limiter.
+  const isRateLimitedPath =
+    pathname.startsWith("/api/metrics/") || pathname === "/api/contact";
+
+  if (!isRateLimitedPath) {
     return NextResponse.next();
   }
 
@@ -255,7 +318,9 @@ export const config = {
     "/dashboard/:path*",
     "/settings",
     "/settings/:path*",
-    "/api/metrics/:path*",
-    "/api/contact",
+    // All API routes: CSRF protection is applied to mutations in the handler
+    // above; rate limiting is scoped to /api/metrics/* and /api/contact.
+    // This single wildcard replaces the previous per-path entries.
+    "/api/:path*",
   ],
 };
