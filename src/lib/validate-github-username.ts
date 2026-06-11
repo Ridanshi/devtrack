@@ -1,4 +1,6 @@
-const GITHUB_USERNAME_RE = /^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i;
+// GitHub username rules: alphanumeric + hyphens only, 1–39 chars,
+// no leading/trailing/consecutive hyphens.
+const GITHUB_USERNAME_RE = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 
 export function isValidGitHubUsername(username: string): boolean {
   return GITHUB_USERNAME_RE.test(username);
