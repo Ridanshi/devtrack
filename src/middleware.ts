@@ -1,4 +1,4 @@
-﻿import { getToken } from "next-auth/jwt";
+import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
 import {
   checkAuthRateLimit,
@@ -10,6 +10,7 @@ import {
   isCsrfExempt,
   validateCsrf,
 } from "@/lib/csrf";
+import { buildCsp } from "@/lib/csp";
 
 export const runtime = "nodejs";
 
@@ -190,6 +191,19 @@ async function checkRateLimit(identifier: string, limit: number) {
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const csp = buildCsp(nonce);
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-nonce", nonce);
+
+  function nextWithNonce(): NextResponse {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+  function withCsp(res: NextResponse): NextResponse {
+    res.headers.set("Content-Security-Policy", csp);
+    return res;
+  }
+
   let token = await getToken({
     req,
     secret: process.env.NEXTAUTH_SECRET,
@@ -214,7 +228,7 @@ export async function middleware(req: NextRequest) {
   if (isApiStateChange) {
     const csrf = validateCsrf(req);
     if (!csrf.valid) {
-      return NextResponse.json({ error: csrf.reason }, { status: 403 });
+      return withCsp(NextResponse.json({ error: csrf.reason }, { status: 403 }));
     }
   }
 
@@ -228,9 +242,9 @@ export async function middleware(req: NextRequest) {
       const url = req.nextUrl.clone();
       url.pathname = "/";
       url.search = "";
-      return NextResponse.redirect(url);
+      return withCsp(NextResponse.redirect(url));
     }
-    return NextResponse.next();
+    return withCsp(nextWithNonce());
   }
 
   if (isAuthSensitivePath(pathname)) {
@@ -241,20 +255,22 @@ export async function middleware(req: NextRequest) {
     if (!authResult.allowed) {
       console.warn("auth_rate_limit_hit", { ip, path: pathname });
       const headers = buildHeaders({ ...authResult, limit: authLimit });
-      return NextResponse.json(
-        { error: "Too many authentication attempts. Please try again later." },
-        { status: 429, headers }
+      return withCsp(
+        NextResponse.json(
+          { error: "Too many authentication attempts. Please try again later." },
+          { status: 429, headers }
+        )
       );
     }
 
-    return NextResponse.next();
+    return withCsp(nextWithNonce());
   }
 
   const isRateLimitedPath =
     pathname.startsWith("/api/metrics/") || pathname === "/api/contact";
 
   if (!isRateLimitedPath) {
-    return NextResponse.next();
+    return withCsp(nextWithNonce());
   }
 
   const githubId = typeof token?.githubId === "string" ? token.githubId : null;
@@ -269,17 +285,19 @@ export async function middleware(req: NextRequest) {
     console.warn(isContact ? "contact_rate_limit_hit" : "metrics_rate_limit_hit", {
       identifier, path: req.nextUrl.pathname, limit,
     });
-    return NextResponse.json(
-      {
-        error: isContact
-          ? "Too many submissions. Please retry shortly."
-          : "Too many metrics requests. Please retry shortly.",
-      },
-      { status: 429, headers }
+    return withCsp(
+      NextResponse.json(
+        {
+          error: isContact
+            ? "Too many submissions. Please retry shortly."
+            : "Too many metrics requests. Please retry shortly.",
+        },
+        { status: 429, headers }
+      )
     );
   }
 
-  const response = NextResponse.next();
+  const response = withCsp(nextWithNonce());
   headers.forEach((value, key) => response.headers.set(key, value));
 
   if (req.method === "GET") {
@@ -291,10 +309,13 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/dashboard",
-    "/dashboard/:path*",
-    "/settings",
-    "/settings/:path*",
-    "/api/:path*",
+    {
+      source:
+        "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml)$).*)",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+      ],
+    },
   ],
 };

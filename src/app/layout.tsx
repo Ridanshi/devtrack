@@ -8,6 +8,7 @@ import Providers from "./providers";
 import OfflineBanner from "@/components/OfflineBanner";
 import "./globals.css";
 import { Toaster } from "sonner";
+import { headers } from "next/headers";
 
 const inter = Inter({ subsets: ["latin"], display: "swap" });
 const syne = Syne({
@@ -57,11 +58,14 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `
               (function() {

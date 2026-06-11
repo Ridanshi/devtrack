@@ -130,6 +130,7 @@ const withPWA = withPWAInit({
 /** @type {import("next").NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false,
   output: "standalone",
   images: {
     remotePatterns: [
@@ -153,8 +154,19 @@ const nextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value: "camera=(), microphone=(), geolocation=(), payment=()",
           },
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=63072000; includeSubDomains; preload",
+          },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+          // NOTE: Content-Security-Policy is intentionally omitted here.
+          // The middleware (src/middleware.ts) sets a per-request nonce-based CSP
+          // header dynamically. Adding a static CSP here would cause browsers to
+          // enforce both policies simultaneously (most-restrictive intersection),
+          // which would break the nonce scheme on all matched routes.
         ],
       },
     ];
